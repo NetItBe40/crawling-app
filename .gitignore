@@ -1,0 +1,37 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+
+# Sensitive config (use settings.py.example as template)
+config/settings.py
+
+# Logs
+logs/
+*.log
+
+# Archives
+*.tar.gz
+
+# Runtime files
+gunicorn.ctl
+*.sock
+*.pid
+
+# Test files
+test2.txt
+test_deploy.txt
+
+# Playwright browsers
+libs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,164 @@
+"""
+Configuration globale du projet Crawling Website
+"""
+import os
+from pathlib import Path
+
+# === Base paths ===
+BASE_DIR = Path(__file__).resolve().parent.parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+# === Database Configuration ===
+DB_CONFIG = {
+    "crawling": {
+        "host": "localhost",
+        "port": 3306,
+        "unix_socket": "/var/lib/mysql/mysql.sock",
+        "user": "YOUR_DB_USER",
+        "password": "YOUR_PASSWORD_HERE",
+        "database": "YOUR_DB_USER",
+        "charset": "utf8mb4",
+        "autocommit": True,
+        "pool_name": "crawling_pool",
+        "pool_size": 10,
+    },
+    "sirene": {
+        "host": "localhost",
+        "port": 3306,
+        "unix_socket": "/var/lib/mysql/mysql.sock",
+        "user": "YOUR_DB_USER",
+        "password": "YOUR_PASSWORD_HERE",
+        "database": "YOUR_SIRENE_DB",
+        "charset": "utf8mb4",
+        "autocommit": True,
+        "pool_name": "sirene_pool",
+        "pool_size": 5,
+    },
+}
+
+# === HTTP Checker Configuration ===
+HTTP_CHECKER = {
+    "batch_size": 500,
+    "timeout": 10,
+    "max_concurrent": 50,
+    "retry_count": 2,
+    "delay_between_batches": 0.5,
+    "user_agent": "Mozilla/5.0 (compatible; CrawlingBot/1.0)",
+    "recheck_days": 30,  # Re-check domains after N days
+}
+
+# === Crawler Configuration ===
+CRAWLER = {
+    "batch_size": 100,
+    "max_pages_per_domain": 10,
+    "page_timeout": 15000,  # ms
+    "navigation_timeout": 30000,  # ms
+    "delay_min": 1.0,  # seconds between requests
+    "delay_max": 2.0,
+    "max_concurrent_browsers": 3,
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "contact_page_patterns": [
+        "contact", "nous-contacter", "contactez-nous", "about", "a-propos",
+        "qui-sommes-nous", "mentions-legales", "legal", "imprint", "impressum",
+        "cgv", "cgu", "conditions-generales"
+    ],
+    "mentions_legales_patterns": [
+        "mentions-legales", "mentions_legales", "mentionslegales",
+        "mentions-l%C3%A9gales", "legal", "mention-legale",
+        "informations-legales", "info-legales",
+    ],
+}
+
+# === Keywords Configuration ===
+KEYWORDS = {
+    "min_length": 3,
+    "use_soundex": True,
+    "stop_words_file": BASE_DIR / "config" / "french_stop_words.txt",
+}
+
+# === SIRETisation Configuration ===
+SIRETISATION = {
+    "batch_size": 200,
+    "score_threshold": 50,  # minimum score to consider a match
+    "weights": {
+        "siret_exact": 100,     # SIRET found on website matches SIRENE
+        "siren_exact": 80,      # SIREN found on website matches SIRENE
+        "denomination": 40,     # Company name match
+        "enseigne": 30,         # Trade name match
+        "code_postal": 20,      # Postal code match
+        "ville": 15,            # City match
+        "adresse": 15,          # Address match
+        "telephone": 10,        # Phone match
+        "naf_keyword": 5,       # NAF code keyword match
+    },
+}
+
+# === Parking Detection ===
+PARKING_PATTERNS = {
+    "registrars": [
+        "godaddy", "namecheap", "ovh", "gandi", "ionos", "1and1",
+        "register.com", "network solutions", "enom", "tucows",
+        "sedo", "dan.com", "afternic", "hugedomains",
+    ],
+    "title_patterns": [
+        "domain parking", "parked domain", "this domain is for sale",
+        "buy this domain", "domain name for sale", "coming soon",
+        "under construction", "site en construction",
+        "ce domaine est Ã  vendre", "nom de domaine Ã  vendre",
+    ],
+}
+
+# === Dashboard Configuration ===
+DASHBOARD = {
+    "host": "0.0.0.0",
+    "port": int(os.getenv("DASHBOARD_PORT", 5050)),
+    "debug": os.getenv("DASHBOARD_DEBUG", "false").lower() == "true",
+    "secret_key": os.getenv("DASHBOARD_SECRET", "crawling-dashboard-secret-key-2024"),
+}
+
+# === Social Network Patterns ===
+SOCIAL_PATTERNS = {
+    1: {  # Facebook
+        "name": "Facebook",
+        "patterns": [r"facebook\.com/[\w.\-]+", r"fb\.com/[\w.\-]+"],
+    },
+    2: {  # LinkedIn
+        "name": "LinkedIn",
+        "patterns": [r"linkedin\.com/(?:company|in)/[\w.\-]+"],
+    },
+    3: {  # Twitter/X
+        "name": "Twitter",
+        "patterns": [r"(?:twitter|x)\.com/[\w.\-]+"],
+    },
+    4: {  # Societe.com
+        "name": "Societe",
+        "patterns": [r"societe\.com/societe/[\w.\-]+"],
+    },
+    5: {  # Instagram
+        "name": "Instagram",
+        "patterns": [r"instagram\.com/[\w.\-]+"],
+    },
+    6: {  # YouTube
+        "name": "YouTube",
+        "patterns": [r"youtube\.com/(?:channel|c|user|@)[\w.\-/]+"],
+    },
+    7: {  # TikTok
+        "name": "TikTok",
+        "patterns": [r"tiktok\.com/@[\w.\-]+"],
+    },
+    8: {  # Pinterest
+        "name": "Pinterest",
+        "patterns": [r"pinterest\.(?:com|fr)/[\w.\-]+"],
+    },
+}
+
+# === Regex Patterns for Data Extraction ===
+EXTRACT_PATTERNS = {
+    "email": r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}",
+    "phone_fr": r"(?:(?:\+33|0033|0)\s*[1-9])(?:[\s.\-]?\d{2}){4}",
+    "siret": r"\b\d{3}\s?\d{3}\s?\d{3}\s?\d{5}\b",
+    "siren": r"\b\d{3}\s?\d{3}\s?\d{3}\b",
+    "postal_code_fr": r"\b(?:0[1-9]|[1-8]\d|9[0-5]|97[1-6])\d{3}\b",
+    "tva_intra": r"\bFR\s?\d{2}\s?\d{3}\s?\d{3}\s?\d{3}\b",
+}

@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crawling Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; }
+        .header { background: #1e293b; padding: 16px 24px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 20px; color: #38bdf8; }
+        .header .status { display: flex; gap: 16px; align-items: center; font-size: 13px; color: #94a3b8; }
+        .header .status .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .header .status .dot.green { background: #22c55e; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        /* Stats Grid */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .stat-card { background: #1e293b; border-radius: 8px; padding: 16px; border: 1px solid #334155; }
+        .stat-card .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-card .value { font-size: 28px; font-weight: 700; color: #f1f5f9; margin: 4px 0; }
+        .stat-card .sub { font-size: 12px; color: #64748b; }
+        .stat-card.highlight { border-color: #38bdf8; }
+        .stat-card.highlight .value { color: #38bdf8; }
+        .stat-card.success { border-color: #22c55e; }
+        .stat-card.success .value { color: #22c55e; }
+        .stat-card.warning { border-color: #f59e0b; }
+        .stat-card.warning .value { color: #f59e0b; }
+
+        /* Sections */
+        .section { background: #1e293b; border-radius: 8px; padding: 20px; margin-bottom: 20px; border: 1px solid #334155; }
+        .section h2 { font-size: 16px; color: #cbd5e1; margin-bottom: 16px; }
+        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+        /* Chart */
+        .chart-container { height: 250px; position: relative; }
+
+        /* Search */
+        .search-box { margin-bottom: 20px; }
+        .search-box input { width: 100%; padding: 10px 16px; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; border-radius: 6px; font-size: 14px; }
+        .search-box input:focus { outline: none; border-color: #38bdf8; }
+
+        /* Table */
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; padding: 8px 12px; background: #0f172a; color: #94a3b8; font-weight: 600; border-bottom: 1px solid #334155; }
+        td { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
+        tr:hover td { background: #1e293b; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+        .badge.online { background: #064e3b; color: #6ee7b7; }
+        .badge.offline { background: #7f1d1d; color: #fca5a5; }
+        .badge.parked { background: #78350f; color: #fcd34d; }
+        .score { font-weight: 700; }
+        .score.high { color: #22c55e; }
+        .score.medium { color: #f59e0b; }
+        .score.low { color: #ef4444; }
+
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; }
+        .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #1e293b; border-radius: 12px; width: 90%; max-width: 800px; max-height: 85vh; overflow-y: auto; padding: 24px; z-index: 1001; border: 1px solid #334155; }
+        .modal h3 { color: #38bdf8; margin-bottom: 16px; }
+        .modal .close { position: absolute; top: 12px; right: 16px; cursor: pointer; color: #94a3b8; font-size: 24px; }
+        .modal-section { margin-bottom: 16px; }
+        .modal-section h4 { color: #94a3b8; font-size: 13px; margin-bottom: 8px; }
+        .data-list { display: flex; flex-wrap: wrap; gap: 6px; }
+        .data-tag { background: #0f172a; padding: 3px 10px; border-radius: 4px; font-size: 12px; color: #cbd5e1; }
+
+        /* Refresh */
+        .refresh-btn { background: #334155; border: none; color: #94a3b8; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        .refresh-btn:hover { background: #475569; color: #e2e8f0; }
+
+        @media (max-width: 768px) {
+            .row { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Crawling Website Dashboard</h1>
+        <div class="status">
+            <span><span class="dot green"></span> Running</span>
+            <span id="last-update"></span>
+            <button class="refresh-btn" onclick="loadAll()">Refresh</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Overview Stats -->
+        <div class="stats-grid" id="stats-grid"></div>
+
+        <!-- Charts Row -->
+        <div class="row">
+            <div class="section">
+                <h2>Activité de crawling (7 jours)</h2>
+                <div class="chart-container">
+                    <canvas id="activityChart"></canvas>
+                </div>
+            </div>
+            <div class="section">
+                <h2>Extensions de domaine</h2>
+                <div class="chart-container">
+                    <canvas id="extensionChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search -->
+        <div class="section">
+            <h2>Rechercher un domaine</h2>
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="Tapez un nom de domaine..." oninput="debounceSearch()">
+            </div>
+            <table id="search-results" style="display:none">
+                <thead>
+                    <tr><th>Domaine</th><th>HTTP</th><th>Code</th><th>Parking</th><th>Crawlé</th><th>Dernier check</th></tr>
+                </thead>
+                <tbody id="search-body"></tbody>
+            </table>
+        </div>
+
+        <!-- Top SIRETisation -->
+        <div class="section">
+            <h2>Top SIRETisation (meilleurs scores)</h2>
+            <table>
+                <thead>
+                    <tr><th>Domaine</th><th>Société</th><th>SIRET</th><th>CP</th><th>Ville</th><th>Score</th></tr>
+                </thead>
+                <tbody id="siret-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Domain Detail Modal -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <div id="modal-content"></div>
+        </div>
+    </div>
+
+    <script>
+        let activityChart, extensionChart;
+        let searchTimeout;
+
+        function formatNumber(n) {
+            if (n === undefined || n === null) return '0';
+            return n.toLocaleString('fr-FR');
+        }
+
+        async function loadOverview() {
+            try {
+                const resp = await fetch('/api/overview');
+                const data = await resp.json();
+                const s = data.stats;
+                const r = data.recent;
+
+                const grid = document.getElementById('stats-grid');
+                grid.innerHTML = `
+                    <div class="stat-card highlight">
+                        <div class="label">Total Domaines</div>
+                        <div class="value">${formatNumber(s.total_domains)}</div>
+                    </div>
+                    <div class="stat-card success">
+                        <div class="label">En ligne</div>
+                        <div class="value">${formatNumber(s.online)}</div>
+                        <div class="sub">${((s.online/s.total_domains)*100).toFixed(1)}%</div>
+                    </div>
+                    <div class="stat-card warning">
+                        <div class="label">Hors ligne</div>
+                        <div class="value">${formatNumber(s.offline)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Parkés</div>
+                        <div class="value">${formatNumber(s.parked)}</div>
+                    </div>
+                    <div class="stat-card success">
+                        <div class="label">Crawlés</div>
+                        <div class="value">${formatNumber(s.crawled)}</div>
+                        <div class="sub">+${formatNumber(r.crawled_recent)} (24h)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">En cours</div>
+                        <div class="value">${formatNumber(s.crawling_now)}</div>
+                    </div>
+                    <div class="stat-card highlight">
+                        <div class="label">Emails</div>
+                        <div class="value">${formatNumber(s.total_emails)}</div>
+                        <div class="sub">${formatNumber(s.with_email)} domaines</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Téléphones</div>
+                        <div class="value">${formatNumber(s.total_phones)}</div>
+                        <div class="sub">${formatNumber(s.with_phone)} domaines</div>
+                    </div>
+                    <div class="stat-card success">
+                        <div class="label">SIRETisés</div>
+                        <div class="value">${formatNumber(s.siretised)}</div>
+                        <div class="sub">${formatNumber(s.with_siret)} avec SIRET</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Mots-clés</div>
+                        <div class="value">${formatNumber(s.total_keywords)}</div>
+                    </div>
+                `;
+                document.getElementById('last-update').textContent = 'Mis à jour: ' + new Date().toLocaleTimeString('fr-FR');
+            } catch(e) { console.error('Overview error:', e); }
+        }
+
+        async function loadActivityChart() {
+            try {
+                const resp = await fetch('/api/hourly?days=7');
+                const data = await resp.json();
+                const labels = data.map(d => d.hour.substring(5));
+                const values = data.map(d => d.count);
+
+                const ctx = document.getElementById('activityChart').getContext('2d');
+                if (activityChart) activityChart.destroy();
+                activityChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels, datasets: [{ label: 'Domaines crawlés', data: values, backgroundColor: '#38bdf880', borderColor: '#38bdf8', borderWidth: 1 }] },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: '#64748b', maxTicksLimit: 20 }, grid: { color: '#1e293b' } }, y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } } }, plugins: { legend: { display: false } } }
+                });
+            } catch(e) { console.error('Chart error:', e); }
+        }
+
+        async function loadExtensionChart() {
+            try {
+                const resp = await fetch('/api/extensions');
+                const data = await resp.json();
+                const labels = data.slice(0,10).map(d => d.extension);
+                const values = data.slice(0,10).map(d => d.count);
+                const colors = ['#38bdf8','#22c55e','#f59e0b','#ef4444','#a78bfa','#f472b6','#34d399','#fb923c','#60a5fa','#c084fc'];
+
+                const ctx = document.getElementById('extensionChart').getContext('2d');
+                if (extensionChart) extensionChart.destroy();
+                extensionChart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: { labels, datasets: [{ data: values, backgroundColor: colors }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 } } } } }
+                });
+            } catch(e) { console.error('Extension chart error:', e); }
+        }
+
+        async function loadTopSiretisation() {
+            try {
+                const resp = await fetch('/api/top-siretisation?limit=20');
+                const data = await resp.json();
+                const tbody = document.getElementById('siret-body');
+                tbody.innerHTML = data.map(d => {
+                    const scoreClass = d.ThG_score >= 80 ? 'high' : d.ThG_score >= 50 ? 'medium' : 'low';
+                    return `<tr onclick="showDomain(${d.domain_id})" style="cursor:pointer">
+                        <td>${d.domaine}</td>
+                        <td>${d.nom_societe || '-'}</td>
+                        <td>${d.ThG_siret || '-'}</td>
+                        <td>${d.code_postal || '-'}</td>
+                        <td>${d.ville || '-'}</td>
+                        <td><span class="score ${scoreClass}">${d.ThG_score}</span></td>
+                    </tr>`;
+                }).join('');
+            } catch(e) { console.error('Siret error:', e); }
+        }
+
+        function debounceSearch() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(doSearch, 300);
+        }
+
+        async function doSearch() {
+            const q = document.getElementById('search-input').value.trim();
+            const table = document.getElementById('search-results');
+            if (q.length < 2) { table.style.display = 'none'; return; }
+
+            try {
+                const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+                const data = await resp.json();
+                const tbody = document.getElementById('search-body');
+                tbody.innerHTML = data.map(d => {
+                    const httpBadge = d.http_statut === 1 ? '<span class="badge online">Online</span>' : '<span class="badge offline">Offline</span>';
+                    const parkBadge = d.flag_parking === 1 ? '<span class="badge parked">Parked</span>' : '-';
+                    return `<tr onclick="showDomain(${d.ID})" style="cursor:pointer">
+                        <td>${d.domaine}</td><td>${httpBadge}</td><td>${d.http_code || '-'}</td>
+                        <td>${parkBadge}</td><td>${d.flag_data_collected ? 'Oui' : 'Non'}</td>
+                        <td>${d.http_at || '-'}</td>
+                    </tr>`;
+                }).join('');
+                table.style.display = data.length ? 'table' : 'none';
+            } catch(e) { console.error('Search error:', e); }
+        }
+
+        async function showDomain(id) {
+            try {
+                const resp = await fetch(`/api/domain/${id}`);
+                const data = await resp.json();
+                if (data.error) return;
+
+                const d = data.domain;
+                let html = `<h3>${d.domaine}</h3>`;
+                html += `<div class="modal-section"><h4>Informations</h4>
+                    <p>HTTP: ${d.http_statut ? 'Online' : 'Offline'} (code ${d.http_code}) | Parking: ${d.flag_parking ? 'Oui' : 'Non'} | Crawlé: ${d.flag_data_collected ? 'Oui' : 'Non'}</p>
+                    <p>${d.description || ''}</p></div>`;
+
+                if (data.emails && data.emails.length) {
+                    html += `<div class="modal-section"><h4>Emails (${data.emails.length})</h4><div class="data-list">`;
+                    html += data.emails.map(e => `<span class="data-tag">${e.email}</span>`).join('');
+                    html += `</div></div>`;
+                }
+                if (data.phones && data.phones.length) {
+                    html += `<div class="modal-section"><h4>Téléphones (${data.phones.length})</h4><div class="data-list">`;
+                    html += data.phones.map(p => `<span class="data-tag">${p.numero}</span>`).join('');
+                    html += `</div></div>`;
+                }
+                if (data.addresses && data.addresses.length) {
+                    html += `<div class="modal-section"><h4>Adresses</h4>`;
+                    html += data.addresses.map(a => `<p class="data-tag">${a.numero} ${a.voie}, ${a.code_postal} ${a.ville}</p>`).join('');
+                    html += `</div>`;
+                }
+                if (data.social && data.social.length) {
+                    html += `<div class="modal-section"><h4>Réseaux sociaux</h4><div class="data-list">`;
+                    html += data.social.map(s => `<a href="${s.url}" target="_blank" class="data-tag" style="color:#38bdf8">${s.url}</a>`).join('');
+                    html += `</div></div>`;
+                }
+                if (data.sirets && data.sirets.length) {
+                    html += `<div class="modal-section"><h4>SIRET trouvés</h4><div class="data-list">`;
+                    html += data.sirets.map(s => `<span class="data-tag">${s.siret}</span>`).join('');
+                    html += `</div></div>`;
+                }
+                if (data.siretisation) {
+                    const si = data.siretisation;
+                    html += `<div class="modal-section"><h4>SIRETisation</h4>
+                        <p>Société: <strong>${si.nom_societe || '-'}</strong> | SIRET: <strong>${si.ThG_siret || '-'}</strong> | Score: <strong>${si.ThG_score || 0}</strong></p></div>`;
+                }
+                if (data.keywords && data.keywords.length) {
+                    html += `<div class="modal-section"><h4>Mots-clés (top ${data.keywords.length})</h4><div class="data-list">`;
+                    html += data.keywords.map(k => `<span class="data-tag">${k.mot_cle} (${k.repetition})</span>`).join('');
+                    html += `</div></div>`;
+                }
+
+                document.getElementById('modal-content').innerHTML = html;
+                document.getElementById('modal-overlay').style.display = 'block';
+            } catch(e) { console.error('Domain detail error:', e); }
+        }
+
+        function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
+
+        function loadAll() { loadOverview(); loadActivityChart(); loadExtensionChart(); loadTopSiretisation(); }
+
+        // Auto-refresh every 30s
+        loadAll();
+        setInterval(loadOverview, 30000);
+    </script>
+</body>
+</html>
