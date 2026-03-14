@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="300">
+    <title>Reporting - Crawling App</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#1a1a2e;color:#eee;min-height:100vh}
+        .header{background:#16213e;padding:20px 30px;border-bottom:3px solid #e94560;display:flex;justify-content:space-between;align-items:center}
+        .header h1{font-size:24px;color:#e94560}
+        .header .date{color:#888;font-size:14px}
+        .container{max-width:1400px;margin:0 auto;padding:20px}
+        .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-bottom:25px}
+        .card{background:#16213e;border-radius:10px;padding:20px;border-left:4px solid #e94560}
+        .card h3{font-size:13px;color:#888;text-transform:uppercase;margin-bottom:8px}
+        .card .value{font-size:28px;font-weight:bold;color:#e94560}
+        .card .sub{font-size:12px;color:#666;margin-top:4px}
+        .section{background:#16213e;border-radius:10px;padding:20px;margin-bottom:20px}
+        .section h2{font-size:18px;color:#e94560;margin-bottom:15px;border-bottom:1px solid #0f3460;padding-bottom:10px}
+        .chart-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+        .chart-box{background:#16213e;border-radius:10px;padding:20px}
+        .chart-box h3{font-size:16px;color:#e94560;margin-bottom:10px}
+        .chart-container{position:relative;height:300px}
+        table{width:100%;border-collapse:collapse}
+        th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #0f3460;font-size:13px}
+        th{color:#e94560;font-weight:600;text-transform:uppercase;font-size:11px}
+        td{color:#ccc}
+        .status-online{color:#4ecca3}
+        .status-offline{color:#e94560}
+        .progress-bar{background:#0f3460;border-radius:10px;height:24px;overflow:hidden;margin:10px 0}
+        .progress-fill{background:linear-gradient(90deg,#e94560,#4ecca3);height:100%;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold}
+        @media(max-width:768px){.chart-row{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,1fr)}}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Reporting Dashboard</h1>
+        <div class="date" id="genDate"></div>
+    </div>
+    <div class="container">
+        <div class="grid" id="statsGrid"></div>
+        <div class="section">
+            <h2>Progression du Crawling</h2>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+            <div style="display:flex;justify-content:space-between;color:#888;font-size:13px;margin-top:5px" id="progressInfo"></div>
+        </div>
+        <div class="section">
+            <h2>Classification des Domaines</h2>
+            <div style="display:flex;gap:30px;flex-wrap:wrap" id="classifInfo"></div>
+        </div>
+        <div class="chart-row">
+            <div class="chart-box"><h3>Statut du Crawling</h3><div class="chart-container"><canvas id="crawlingChart"></canvas></div></div>
+            <div class="chart-box"><h3>Activite Quotidienne (30j)</h3><div class="chart-container"><canvas id="dailyChart"></canvas></div></div>
+        </div>
+        <div class="chart-row">
+            <div class="chart-box"><h3>HTTP Statut</h3><div class="chart-container"><canvas id="httpChart"></canvas></div></div>
+            <div class="chart-box"><h3>Donnees Extraites</h3><div class="chart-container"><canvas id="dataChart"></canvas></div></div>
+        </div>
+        <div class="chart-row">
+            <div class="chart-box"><h3>HTTP Verification Quotidienne (30j)</h3><div class="chart-container"><canvas id="httpDailyChart"></canvas></div></div>
+            <div class="chart-box"><h3>Distribution des Extensions</h3><div class="chart-container"><canvas id="extChart"></canvas></div></div>
+        </div>
+        <div class="section">
+            <h2>Siretisation</h2>
+            <div style="display:flex;gap:30px;flex-wrap:wrap" id="siretInfo"></div>
+        </div>
+        <div class="section">
+            <h2>Processus PM2</h2>
+            <table><thead><tr><th>Service</th><th>Statut</th><th>CPU %</th><th>Memoire (MB)</th><th>Restarts</th></tr></thead><tbody id="pm2Body"></tbody></table>
+        </div>
+        <div class="section">
+            <h2>Erreurs HTTP Recentes</h2>
+            <table><thead><tr><th>Domaine</th><th>Code HTTP</th><th>Date</th></tr></thead><tbody id="errBody"></tbody></table>
+        </div>
+    </div>
+    <script>
+        var R = {{ report|tojson }};
+        var gs = R.global_stats || {};
+        var cp = R.crawling_progress || {};
+        var hs = R.http_stats || {};
+        var ds = R.data_extraction_stats || {};
+        var ss = R.siretisation_stats || {};
+        function fmt(n){return (n||0).toLocaleString('fr-FR')}
+        document.getElementById('genDate').textContent = R.generated_at || '';
+        var cards = [
+            ['Total Domaines', gs.total_domaines],
+            ['Domaines Crawles', gs.domaines_crawles, cp.percentage+'%'],
+            ['En Attente', gs.domaines_en_cours],
+            ['HTTP Verifies', gs.http_verifies],
+            ['HTTP Erreurs', gs.http_erreurs],
+            ['Emails', gs.total_emails],
+            ['Telephones', gs.total_telephones],
+            ['Adresses', gs.total_adresses],
+            ['Reseaux Sociaux', gs.total_reseaux_sociaux],
+            ['SIRET', gs.total_siret],
+            ['SIREN', gs.total_siren]
+        ];
+        var gh = '';
+        cards.forEach(function(c){gh+='<div class="card"><h3>'+c[0]+'</h3><div class="value">'+fmt(c[1])+'</div>'+(c[2]?'<div class="sub">'+c[2]+'</div>':'')+'</div>';});
+        document.getElementById('statsGrid').innerHTML = gh;
+        var pf = document.getElementById('progressFill');
+        pf.style.width = (cp.percentage||0)+'%';
+        pf.textContent = (cp.percentage||0)+'%';
+        document.getElementById('progressInfo').innerHTML = '<span>Crawles: '+fmt(cp.crawled)+'</span><span>Restants: '+fmt(cp.remaining)+'</span><span>Total: '+fmt(cp.total)+'</span>';
+        document.getElementById('classifInfo').innerHTML = '<div><span style="color:#888">Production:</span> <strong style="color:#4ecca3">'+fmt(gs.domaines_production)+'</strong></div><div><span style="color:#888">Parking:</span> <strong style="color:#e94560">'+fmt(gs.domaines_parking)+'</strong></div><div><span style="color:#888">Relocation:</span> <strong style="color:#ffc107">'+fmt(gs.domaines_relocation)+'</strong></div>';
+        document.getElementById('siretInfo').innerHTML = '<div><span style="color:#888">Siretisations:</span> <strong>'+fmt(ss.total_siretisations)+'</strong></div><div><span style="color:#888">SIRET:</span> <strong>'+fmt(ss.total_siret)+'</strong></div><div><span style="color:#888">SIREN:</span> <strong>'+fmt(ss.total_siren)+'</strong></div><div><span style="color:#888">TVA:</span> <strong>'+fmt(ss.total_tva)+'</strong></div>';
+        var pm2h = '';
+        (R.pm2_status||[]).forEach(function(s){pm2h+='<tr><td>'+s.name+'</td><td class="'+(s.status==='online'?'status-online':'status-offline')+'">'+s.status+'</td><td>'+s.cpu+'</td><td>'+s.memory_mb+'</td><td>'+s.restarts+'</td></tr>';});
+        document.getElementById('pm2Body').innerHTML = pm2h;
+        var errh = '';
+        (R.recent_errors||[]).slice(0,10).forEach(function(e){errh+='<tr><td>'+e.domaine+'</td><td>'+(e.http_code||'-')+'</td><td>'+e.http_at+'</td></tr>';});
+        document.getElementById('errBody').innerHTML = errh;
+        Chart.defaults.color = '#888';
+        Chart.defaults.borderColor = '#0f3460';
+        new Chart(document.getElementById('crawlingChart'),{type:'doughnut',data:{labels:['Crawles','En attente'],datasets:[{data:[cp.crawled||0,cp.remaining||0],backgroundColor:['#4ecca3','#e94560']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
+        var dd = R.daily_activity||[];
+        new Chart(document.getElementById('dailyChart'),{type:'line',data:{labels:dd.map(function(d){return d.day}),datasets:[{label:'Crawles',data:dd.map(function(d){return d.crawled}),borderColor:'#4ecca3',backgroundColor:'rgba(78,204,163,0.1)',fill:true,tension:0.3},{label:'Collectes',data:dd.map(function(d){return d.collected}),borderColor:'#e94560',backgroundColor:'rgba(233,69,96,0.1)',fill:true,tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{maxTicksLimit:10}}}}});
+        new Chart(document.getElementById('httpChart'),{type:'bar',data:{labels:['OK','Erreur','En attente'],datasets:[{data:[hs.ok||0,hs.error||0,hs.pending||0],backgroundColor:['#4ecca3','#e94560','#ffc107']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+        new Chart(document.getElementById('dataChart'),{type:'bar',data:{labels:['Emails','Telephones','Adresses','Reseaux Sociaux','Mots-cles','Dirigeants'],datasets:[{data:[ds.total_emails||0,ds.total_telephones||0,ds.total_adresses||0,ds.total_reseaux_sociaux||0,ds.total_mots_cles||0,ds.total_dirigeants||0],backgroundColor:['#e94560','#4ecca3','#ffc107','#533483','#0f3460','#e94560']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{font:{size:10}}}}}});
+        var hdd = R.http_daily||[];
+        new Chart(document.getElementById('httpDailyChart'),{type:'bar',data:{labels:hdd.map(function(d){return d.day}),datasets:[{label:'OK',data:hdd.map(function(d){return d.ok}),backgroundColor:'#4ecca3'},{label:'Erreur',data:hdd.map(function(d){return d.error}),backgroundColor:'#e94560'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true,ticks:{maxTicksLimit:10}},y:{stacked:true}}}});
+        var ed = R.extension_distribution||[];
+        new Chart(document.getElementById('extChart'),{type:'bar',data:{labels:ed.map(function(d){return '.'+d.extension}),datasets:[{data:ed.map(function(d){return d.count}),backgroundColor:'#e94560'}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}}}});
+    </script>
+</body>
+</html>

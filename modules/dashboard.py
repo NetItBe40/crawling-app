@@ -234,6 +234,31 @@ def api_logs():
     return jsonify(logs)
 
 
+
+# ===== Reporting Routes =====
+from modules.reporting import get_full_report
+
+@app.route('/reporting')
+def reporting_page():
+    """Render the reporting dashboard."""
+    try:
+        report = get_full_report()
+        return render_template('reporting.html', report=report)
+    except Exception as e:
+        logger.error(f'Error in reporting_page: {e}')
+        return f'Error generating report: {e}', 500
+
+@app.route('/api/reporting')
+def api_reporting():
+    """API endpoint for reporting data."""
+    try:
+        report = get_full_report()
+        return jsonify(report)
+    except Exception as e:
+        logger.error(f'Error in api_reporting: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
 def main():
     logger.info(f"Dashboard starting on {DASHBOARD['host']}:{DASHBOARD['port']}")
     app.run(
