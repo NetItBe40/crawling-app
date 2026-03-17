@@ -23,6 +23,7 @@ Application de crawling web pour collecter les donnees de contact des entreprise
 3. `pip install -r requirements.txt`
 4. `playwright install chromium`
 5. `pm2 start ecosystem.config.js`
+6. `pm2 start ecosystem.siretisation.config.js` (lance 4 workers siretisation paralleles)
 
 ## Services PM2
 
@@ -32,4 +33,4 @@ Application de crawling web pour collecter les donnees de contact des entreprise
 | dashboard | Interface web de monitoring |
 | http-checker | Verification HTTP asynchrone |
 | sirene-api | API de recherche SIRENE |
-| siretisation | Croisement domaines/SIRENE |
+| siretisation-w0..w3 | Croisement domaines/SIRENE (4 workers paralleles via MOD partitioning) |

@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.1.0] - 2026-03-16
+
+### Performance - Optimisation SIRETisation (x5)
+
+- **4 workers PM2 paralleles** : Nouveau fichier `ecosystem.siretisation.config.js` avec partitionnement par `MOD(d.ID, 4)` pour repartir la charge sur 4 processus independants
+- **batch_size augmente** : De 200 a 500 domaines par cycle (+150%)
+- **Sleep reduit** : De 120s a 30s entre les cycles (reactivite x4)
+- **Requete SQL optimisee** : Remplacement de `NOT IN (subquery)` par `LEFT JOIN ... IS NULL` + fonction `MOD()` pour MariaDB
+- **Resultat mesure** : Debit passe de ~30/h (~720/jour) a ~147/h (~3522/jour)
+
+### Corrections
+
+- **Dashboard recent-siretisation** : Correction ORDER BY `created_at` -> `updated_at` pour afficher les SIRETisations les plus recentes
+- **Dashboard reporting** : Ajout graphiques Chart.js et statistiques detaillees
+- **Crawler** : Ameliorations diverses du module de crawling
+- **HTTP Checker** : Corrections mineures
+- **Database** : Ameliorations du module utilitaire database
+
+### Infrastructure
+
+- Ajout `ecosystem.siretisation.config.js` pour gerer les 4 workers PM2 siretisation
+- Variables d'environnement `WORKER_ID` et `NUM_WORKERS` pour le partitionnement
+- Utilisation du virtualenv Python + PYTHONPATH dans la config PM2
+
+
 ## [1.0.0] - 2026-03-14
 
 ### Corrections critiques

@@ -91,16 +91,27 @@ class DatabaseManager:
     @classmethod
     def execute_query(cls, query: str, params: tuple = None, db_name: str = "crawling",
                       dictionary: bool = True, fetch: str = "all"):
-        """Execute a single query and return results."""
-        with cls.get_cursor(db_name, dictionary=dictionary) as cursor:
-            cursor.execute(query, params)
-            if fetch == "all":
-                return cursor.fetchall()
-            elif fetch == "one":
-                return cursor.fetchone()
-            elif fetch == "none":
-                return cursor.rowcount
-            return cursor.fetchall()
+        """Execute a single query and return results with retry on connection errors."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with cls.get_cursor(db_name, dictionary=dictionary) as cursor:
+                    cursor.execute(query, params)
+                    if fetch == "all":
+                        return cursor.fetchall()
+                    elif fetch == "one":
+                        return cursor.fetchone()
+                    elif fetch == "none":
+                        return cursor.rowcount
+                    return cursor.fetchall()
+            except MySQLError as e:
+                if attempt < max_retries - 1 and e.errno in (2002, 2003, 2006, 2013, 2055):
+                    logger.warning(f"Query retry {attempt+1}/{max_retries} on '{db_name}': {e}")
+                    if db_name in cls._pools:
+                        del cls._pools[db_name]
+                    time.sleep(1 * (2 ** attempt))
+                else:
+                    raise
 
     @classmethod
     def close_all(cls):

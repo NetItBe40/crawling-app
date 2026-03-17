@@ -150,6 +150,7 @@ class HTTPChecker:
                 http_iteration = %s,
                 flag_parking = %s,
                 flag_relocation = %s,
+                    flag_production = %s,
                 domaine_relocation = %s,
                 updated_at = %s
             WHERE ID = %s
@@ -173,10 +174,11 @@ class HTTPChecker:
         for r in results:
             is_reloc = 1 if r["redirect_url"] else 0
             is_park = 1 if r["is_parking"] else 0
+            is_prod = 1 if (r["http_statut"] == 1 and str(r["http_code"]) == "200" and not is_park and not is_reloc) else 0
 
             domain_data.append((
                 r["http_statut"], r["http_code"], now, r["iteration"],
-                is_park, is_reloc, r["redirect_url"], now, r["id"]
+                is_park, is_reloc, is_prod, r["redirect_url"], now, r["id"]
             ))
             serv_data.append((
                 r["domaine"], r["http_statut"], now, r["http_code"], now, now

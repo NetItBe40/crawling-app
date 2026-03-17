@@ -254,6 +254,7 @@ class WebCrawler:
               AND d.flag_parking = 0
               AND d.flag_crawling = 0
               AND (d.flag_data_collected = 0 OR d.flag_data_collected IS NULL)
+                AND (d.crawled_iteration IS NULL OR d.crawled_iteration < 3)
             ORDER BY d.crawled_at ASC, d.ID ASC
             LIMIT %s
         """
@@ -500,6 +501,16 @@ class WebCrawler:
                 data
             )
 
+            # Save TVA
+            tva_list = result.get("tva", [])
+            if tva_list:
+                has_data = True
+                tva_data = [(domain_id, t, now, now) for t in tva_list[:5]]
+                DatabaseManager.execute_many(
+                    "INSERT IGNORE INTO APP_tva (id_domaine, tva, created_at, updated_at) VALUES (%s, %s, %s, %s)",
+                    tva_data
+                )
+
         # Save keywords (delete old + insert new)
         keywords = list(kw_merged.values())[:500]
         if keywords:
@@ -522,12 +533,13 @@ class WebCrawler:
             """UPDATE APP_domaine
                SET flag_crawling = 0,
                    flag_data_collected = %s,
+                   flag_production = %s,
                    crawled_at = %s,
                    crawled_iteration = COALESCE(crawled_iteration, 0) + 1,
                    description = %s,
                    updated_at = %s
                WHERE ID = %s""",
-            (1 if has_data else 0, now, desc, now, domain_id),
+            (1 if has_data else 0, 1 if has_data else 0, now, desc, now, domain_id),
             fetch="none",
         )
 
@@ -535,7 +547,7 @@ class WebCrawler:
             self.stats["data_collected"] += 1
 
     async def run(self):
-        """Main crawler loop."""
+        """Main crawler loop with browser resilience."""
         from playwright.async_api import async_playwright
 
         self.stats["start_time"] = time.time()
@@ -544,13 +556,48 @@ class WebCrawler:
         # Initialize stop words
         StopWordsManager.get_instance()
 
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-            )
+        DOMAIN_TIMEOUT = 120
+        BROWSER_MAX_DOMAINS = 50
+        browser = None
+        pw_context = None
+        pw = None
+
+        async def launch_browser():
+            nonlocal browser, pw_context, pw
+            try:
+                if browser:
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+                if pw_context:
+                    try:
+                        await pw_context.__aexit__(None, None, None)
+                    except Exception:
+                        pass
+                pw_context = async_playwright()
+                pw = await pw_context.__aenter__()
+                browser = await pw.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                          "--disable-extensions", "--disable-background-networking",
+                          "--disable-default-apps", "--disable-sync", "--no-first-run"],
+                )
+                logger.info("Browser launched successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to launch browser: {e}")
+                browser = None
+                return False
+
+        try:
+            if not await launch_browser():
+                logger.error("Cannot start browser, exiting")
+                return
 
             cycle = 0
+            domains_since_restart = 0
+
             while not shutdown_event.is_set():
                 domains = self.get_domains_to_crawl()
 
@@ -565,37 +612,100 @@ class WebCrawler:
                 cycle += 1
                 domain_ids = [d["ID"] for d in domains]
                 self.mark_crawling(domain_ids, flag=1)
-
                 logger.info(f"Cycle {cycle}: crawling {len(domains)} domains...")
 
                 for domain in domains:
                     if shutdown_event.is_set():
                         break
 
+                    # Restart browser periodically to prevent memory leaks
+                    if domains_since_restart >= BROWSER_MAX_DOMAINS:
+                        logger.info(f"Restarting browser after {domains_since_restart} domains...")
+                        if not await launch_browser():
+                            logger.error("Browser restart failed, retrying...")
+                            await asyncio.sleep(5)
+                            if not await launch_browser():
+                                logger.error("Browser restart failed twice, stopping cycle")
+                                break
+                        domains_since_restart = 0
+
                     try:
-                        result = await self.crawl_domain(browser, domain)
+                        result = await asyncio.wait_for(
+                            self.crawl_domain(browser, domain),
+                            timeout=DOMAIN_TIMEOUT
+                        )
                         self.stats["crawled"] += 1
+                        domains_since_restart += 1
 
                         if result["success"]:
                             self.save_results(result)
                         else:
-                            # Mark as not crawling anymore even if failed
                             DatabaseManager.execute_query(
-                                "UPDATE APP_domaine SET flag_crawling = 0, updated_at = NOW() WHERE ID = %s",
+                                """UPDATE APP_domaine
+                                   SET flag_crawling = 0,
+                                       crawled_at = NOW(),
+                                       crawled_iteration = COALESCE(crawled_iteration, 0) + 1,
+                                       updated_at = NOW()
+                                   WHERE ID = %s""",
                                 (domain["ID"],), fetch="none",
                             )
 
-                        if self.stats["crawled"] % 50 == 0:
-                            logger.info(
-                                f"Progress: crawled={self.stats['crawled']} | "
-                                f"data_collected={self.stats['data_collected']} | "
-                                f"errors={self.stats['errors']}"
-                            )
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Timeout ({DOMAIN_TIMEOUT}s) on {domain['domaine']}")
+                        self.stats["errors"] += 1
+                        self.stats["crawled"] += 1
+                        domains_since_restart += 1
+                        DatabaseManager.execute_query(
+                            """UPDATE APP_domaine
+                               SET flag_crawling = 0,
+                                   crawled_at = NOW(),
+                                   crawled_iteration = COALESCE(crawled_iteration, 0) + 1,
+                                   updated_at = NOW()
+                               WHERE ID = %s""",
+                            (domain["ID"],), fetch="none",
+                        )
+                        # Check if browser is still alive
+                        try:
+                            p = await browser.new_page()
+                            await p.close()
+                        except Exception:
+                            logger.warning("Browser dead after timeout, relaunching...")
+                            if not await launch_browser():
+                                break
+                            domains_since_restart = 0
+
                     except Exception as e:
+                        err_str = str(e).lower()
+                        self.stats["errors"] += 1
+                        self.stats["crawled"] += 1
                         logger.error(f"Fatal error on {domain['domaine']}: {e}")
                         self.mark_crawling([domain["ID"]], flag=0)
 
-            await browser.close()
+                        if "browser" in err_str or "closed" in err_str or "connection" in err_str or "target" in err_str:
+                            logger.warning("Browser appears crashed, relaunching...")
+                            if not await launch_browser():
+                                logger.error("Cannot relaunch browser, stopping")
+                                break
+                            domains_since_restart = 0
+
+                    if self.stats["crawled"] % 50 == 0:
+                        logger.info(
+                            f"Progress: crawled={self.stats['crawled']} | "
+                            f"data_collected={self.stats['data_collected']} | "
+                            f"errors={self.stats['errors']}"
+                        )
+
+        finally:
+            try:
+                if browser:
+                    await browser.close()
+            except Exception:
+                pass
+            try:
+                if pw_context:
+                    await pw_context.__aexit__(None, None, None)
+            except Exception:
+                pass
 
         logger.info(f"=== Crawler stopped. Total: {self.stats['crawled']} ===")
 

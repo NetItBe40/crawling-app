@@ -4,6 +4,7 @@ Interface web de monitoring pour suivre l'avancement du crawling,
 les statistiques et les résultats.
 """
 import json
+import subprocess
 from datetime import datetime, timedelta
 from flask import Flask, render_template, jsonify, request
 
@@ -19,6 +20,37 @@ app = Flask(__name__,
 app.secret_key = DASHBOARD["secret_key"]
 
 
+
+def get_pm2_processes() -> list:
+    """Get PM2 process list with status info."""
+    try:
+        result = subprocess.run(
+            ['/home/netit972/.npm-global/bin/pm2', 'jlist'],
+            capture_output=True, text=True, timeout=10,
+            cwd='/home/netit972/crawling-app'
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            processes = json.loads(result.stdout)
+            pm2_list = []
+            for p in processes:
+                env = p.get('pm2_env', {})
+                monit = p.get('monit', {})
+                pm2_list.append({
+                    'name': p.get('name', 'unknown'),
+                    'pid': p.get('pid', 0),
+                    'status': env.get('status', 'unknown'),
+                    'cpu': monit.get('cpu', 0),
+                    'memory': round(monit.get('memory', 0) / 1024 / 1024, 1),
+                    'uptime': env.get('pm_uptime', 0),
+                    'restarts': env.get('restart_time', 0),
+                    'created_at': env.get('created_at', 0),
+                })
+            return pm2_list
+        return []
+    except Exception as e:
+        logger.error(f"Error getting PM2 processes: {e}")
+        return []
+
 def get_overview_stats() -> dict:
     queries = {
         "total_domains": "SELECT COUNT(*) as cnt FROM APP_domaine WHERE deleted=0",
@@ -31,7 +63,7 @@ def get_overview_stats() -> dict:
         "with_email": "SELECT COUNT(DISTINCT id_domaine) as cnt FROM APP_email WHERE deleted=0",
         "with_phone": "SELECT COUNT(DISTINCT id_domaine) as cnt FROM APP_telephone WHERE deleted=0",
         "with_siret": "SELECT COUNT(DISTINCT id_domaine) as cnt FROM APP_siret WHERE deleted=0",
-        "siretised": "SELECT COUNT(*) as cnt FROM APP_domaine_SIRETISATION WHERE ThG_score > 0",
+        "siretised": "SELECT COUNT(*) as cnt FROM APP_domaine_SIRETISATION WHERE ThG_MR_score > 0",
         "total_emails": "SELECT COUNT(*) as cnt FROM APP_email WHERE deleted=0",
         "total_phones": "SELECT COUNT(*) as cnt FROM APP_telephone WHERE deleted=0",
         "total_keywords": "SELECT COUNT(*) as cnt FROM APP_mot_cle WHERE deleted=0",
@@ -86,9 +118,9 @@ def get_hourly_stats(days: int = 7) -> list:
 
 def get_extension_stats() -> list:
     query = """
-        SELECT extension, COUNT(*) as count
+        SELECT SUBSTRING_INDEX(domaine, '.', -1) as extension, COUNT(*) as count
         FROM APP_domaine
-        WHERE deleted=0 AND extension IS NOT NULL AND extension != ''
+        WHERE deleted=0 AND domaine IS NOT NULL AND domaine != ''
         GROUP BY extension
         ORDER BY count DESC
         LIMIT 20
@@ -102,11 +134,11 @@ def get_extension_stats() -> list:
 def get_top_siretisation(limit: int = 20) -> list:
     query = """
         SELECT s.ID as domain_id, d.domaine, s.nom_societe,
-               s.ThG_siret, s.ThG_score, s.code_postal, s.ville
+               s.ThG_siret, s.ThG_MR_score, s.code_postal, s.ville
         FROM APP_domaine_SIRETISATION s
         JOIN APP_domaine d ON s.ID = d.ID
-        WHERE s.ThG_score > 50
-        ORDER BY s.ThG_score DESC
+        WHERE s.ThG_MR_score > 50
+        ORDER BY s.ThG_MR_score DESC
         LIMIT %s
     """
     try:
@@ -198,6 +230,79 @@ def api_top_siretisation():
     return jsonify(data)
 
 
+@app.route("/api/recent-siretisation")
+def api_recent_siretisation():
+    """Get the 100 most recent siretisations with timestamps."""
+    try:
+        limit = request.args.get("limit", 100, type=int)
+        data = DatabaseManager.execute_query("""
+            SELECT s.ID as domain_id, d.domaine, s.nom_societe, s.ThG_siret,
+                   s.ThG_MR_score, s.code_postal, s.ville, s.adresse,
+                   s.created_at, s.updated_at
+            FROM APP_domaine_SIRETISATION s
+            JOIN APP_domaine d ON s.ID = d.ID
+            WHERE s.ThG_MR_score > 0
+            ORDER BY s.updated_at DESC
+            LIMIT %s
+        """, (limit,))
+        result = []
+        for row in data:
+            r = dict(row)
+            if r.get('created_at'):
+                r['created_at'] = r['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+            if r.get('updated_at'):
+                r['updated_at'] = r['updated_at'].strftime('%Y-%m-%d %H:%M:%S')
+            result.append(r)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Recent siretisation error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/diag-siretisation")
+def api_diag_siretisation():
+    """Diagnostic: check siretisation status."""
+    try:
+        pending = DatabaseManager.execute_query("""
+            SELECT COUNT(*) as cnt FROM APP_domaine d
+            WHERE d.deleted = 0
+              AND d.flag_data_collected = 1
+              AND d.ID NOT IN (
+                  SELECT DISTINCT ID FROM APP_domaine_SIRETISATION
+                  WHERE ThG_MR_score IS NOT NULL AND ThG_MR_score > 0
+              )
+        """)
+        recent = DatabaseManager.execute_query("""
+            SELECT MAX(updated_at) as last_updated, MAX(created_at) as last_created,
+                   COUNT(*) as total_siretised
+            FROM APP_domaine_SIRETISATION WHERE ThG_MR_score > 0
+        """)
+        daily = DatabaseManager.execute_query("""
+            SELECT DATE(updated_at) as dt, COUNT(*) as cnt
+            FROM APP_domaine_SIRETISATION
+            WHERE updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+              AND ThG_MR_score > 0
+            GROUP BY DATE(updated_at)
+            ORDER BY dt DESC
+        """)
+        daily_result = []
+        for row in daily:
+            r = dict(row)
+            if r.get('dt'):
+                r['dt'] = r['dt'].strftime('%Y-%m-%d')
+            daily_result.append(r)
+        return jsonify({
+            "pending_domains": pending[0]['cnt'] if pending else 0,
+            "last_updated": recent[0]['last_updated'].strftime('%Y-%m-%d %H:%M:%S') if recent and recent[0].get('last_updated') else None,
+            "last_created": recent[0]['last_created'].strftime('%Y-%m-%d %H:%M:%S') if recent and recent[0].get('last_created') else None,
+            "total_siretised": recent[0]['total_siretised'] if recent else 0,
+            "daily_activity": daily_result
+        })
+    except Exception as e:
+        logger.error(f"Diag siretisation error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/search")
 def api_search():
     q = request.args.get("q", "")
@@ -226,6 +331,25 @@ def api_domain(domain_id):
     )
 
 
+@app.route("/api/pm2")
+def api_pm2():
+    processes = get_pm2_processes()
+    return jsonify(processes)
+
+@app.route("/api/pm2/<action>/<name>", methods=["POST"])
+def api_pm2_action(action, name):
+    if action not in ('restart', 'stop', 'start'):
+        return jsonify({"error": "Invalid action"}), 400
+    try:
+        result = subprocess.run(
+            ['/home/netit972/.npm-global/bin/pm2', action, name],
+            capture_output=True, text=True, timeout=15,
+            cwd='/home/netit972/crawling-app'
+        )
+        return jsonify({"success": result.returncode == 0, "output": result.stdout})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/logs")
 def api_logs():
     logs = DatabaseManager.execute_query(
@@ -234,8 +358,73 @@ def api_logs():
     return jsonify(logs)
 
 
+@app.route("/api/db-check")
+def api_db_check():
+    """Diagnostic endpoint to check DB schema."""
+    try:
+        tables = DatabaseManager.execute_query("SHOW TABLES")
+        siret_cols = DatabaseManager.execute_query("DESCRIBE APP_domaine_SIRETISATION")
+        domaine_cols = DatabaseManager.execute_query("DESCRIBE APP_domaine")
+        return jsonify({
+            "tables": tables,
+            "siretisation_columns": siret_cols,
+            "domaine_columns": domaine_cols
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/service-health")
+def api_service_health():
+    """Health check for all services with error logs."""
+    import os
+    health = {}
+    log_dir = "/home/netit972/crawling-app/logs"
+    services = ["http-checker", "crawler", "siretisation", "dashboard"]
+    for svc in services:
+        err_file = os.path.join(log_dir, f"pm2-{svc}.error.log")
+        try:
+            if os.path.exists(err_file):
+                with open(err_file, "r") as f:
+                    lines = f.readlines()
+                    health[svc] = {
+                        "error_lines": len(lines),
+                        "last_errors": [l.strip() for l in lines[-10:]]
+                    }
+            else:
+                health[svc] = {"error_lines": 0, "last_errors": []}
+        except Exception as e:
+            health[svc] = {"error": str(e)}
+    return jsonify(health)
+
+
 
 # ===== Reporting Routes =====
+
+@app.route("/api/recent-activity")
+def api_recent_activity():
+    """Get daily crawling activity for the last 30 days."""
+    try:
+        data = DatabaseManager.execute_query("""
+            SELECT DATE(crawled_at) as date,
+                   COUNT(*) as crawled,
+                   COUNT(DISTINCT CASE WHEN http_statut=1 THEN ID END) as online,
+                   SUM(CASE WHEN flag_data_collected=1 THEN 1 ELSE 0 END) as collected
+            FROM APP_domaine
+            WHERE crawled_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+              AND crawled_at IS NOT NULL
+            GROUP BY DATE(crawled_at)
+            ORDER BY date DESC
+            LIMIT 30
+        """)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================
+# REPORTING
+# ============================================================
 from modules.reporting import get_full_report
 
 @app.route('/reporting')

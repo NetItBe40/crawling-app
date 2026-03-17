@@ -15,7 +15,25 @@
         .header .status .dot.green { background: #22c55e; }
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
 
-        /* Stats Grid */
+        
+/* PM2 Processes */
+.pm2-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.pm2-header h2 { margin-bottom: 0; }
+.pm2-summary { display: flex; gap: 12px; align-items: center; font-size: 13px; }
+.pm2-summary .count { font-weight: 700; font-size: 16px; }
+.pm2-summary .running { color: #22c55e; }
+.pm2-summary .stopped { color: #ef4444; }
+.badge.stopped { background: #7f1d1d; color: #fca5a5; }
+.badge.errored { background: #7f1d1d; color: #fca5a5; }
+.pm2-actions { display: flex; gap: 6px; }
+.pm2-btn { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+.pm2-btn:hover { background: #334155; }
+.pm2-btn.restart { border-color: #f59e0b; color: #f59e0b; }
+.pm2-btn.stop { border-color: #ef4444; color: #ef4444; }
+.pm2-btn.start { border-color: #22c55e; color: #22c55e; }
+.uptime-text { color: #94a3b8; font-size: 12px; }
+
+/* Stats Grid */
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
         .stat-card { background: #1e293b; border-radius: 8px; padding: 16px; border: 1px solid #334155; }
         .stat-card .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -77,10 +95,16 @@
 </head>
 <body>
     <div class="header">
-        <h1>Crawling Website Dashboard</h1>
+        <div style="display:flex;align-items:center;gap:24px;">
+            <h1>Crawling Website Dashboard</h1>
+            <nav style="display:flex;gap:12px;">
+                <a href="/" style="color:#38bdf8;text-decoration:none;font-size:13px;padding:4px 10px;border:1px solid #334155;border-radius:4px;">Dashboard</a>
+                <a href="/reporting" style="color:#94a3b8;text-decoration:none;font-size:13px;padding:4px 10px;border:1px solid #334155;border-radius:4px;">Reporting</a>
+            </nav>
+        </div>
         <div class="status">
             <span><span class="dot green"></span> Running</span>
-            <span id="last-update"></span>
+            <span id="last-update" style="font-size:11px;color:#64748b;"></span>
             <button class="refresh-btn" onclick="loadAll()">Refresh</button>
         </div>
     </div>
@@ -129,6 +153,46 @@
                 <tbody id="siret-body"></tbody>
             </table>
         </div>
+    </div>
+
+    <!-- PM2 Processes -->
+        <div class="section">
+            <div class="pm2-header">
+                <h2>Processus PM2</h2>
+                <div class="pm2-summary">
+                    <span>Total: <span class="count" id="pm2-total">-</span></span>
+                    <span>En ligne: <span class="count running" id="pm2-online">-</span></span>
+                    <span>Arrêtés: <span class="count stopped" id="pm2-stopped">-</span></span>
+                </div>
+            </div>
+            <table id="pm2-table">
+                <thead>
+                    <tr><th>Nom</th><th>PID</th><th>Statut</th><th>CPU</th><th>Mémoire</th><th>Uptime</th><th>Redémarrages</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="pm2-body"></tbody>
+            </table>
+        </div>
+
+        <!-- Service Health & Logs -->
+    <div class="section">
+        <div class="pm2-header">
+            <h2>Journal des erreurs</h2>
+            <button class="btn" onclick="loadServiceHealth()" style="background:#4a5568;border:none;color:white;padding:4px 12px;border-radius:4px;cursor:pointer;">Rafraichir</button>
+        </div>
+        <div id="service-health"></div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="section">
+        <div class="pm2-header">
+            <h2>Activite recente (30 jours)</h2>
+        </div>
+        <table id="activity-table">
+            <thead>
+                <tr><th>Date</th><th>Domaines crawles</th><th>En ligne</th><th>Donnees collectees</th></tr>
+            </thead>
+            <tbody id="activity-body"></tbody>
+        </table>
     </div>
 
     <!-- Domain Detail Modal -->
@@ -248,14 +312,14 @@
                 const data = await resp.json();
                 const tbody = document.getElementById('siret-body');
                 tbody.innerHTML = data.map(d => {
-                    const scoreClass = d.ThG_score >= 80 ? 'high' : d.ThG_score >= 50 ? 'medium' : 'low';
+                    const scoreClass = d.ThG_MR_score >= 80 ? 'high' : d.ThG_MR_score >= 50 ? 'medium' : 'low';
                     return `<tr onclick="showDomain(${d.domain_id})" style="cursor:pointer">
                         <td>${d.domaine}</td>
                         <td>${d.nom_societe || '-'}</td>
                         <td>${d.ThG_siret || '-'}</td>
                         <td>${d.code_postal || '-'}</td>
                         <td>${d.ville || '-'}</td>
-                        <td><span class="score ${scoreClass}">${d.ThG_score}</span></td>
+                        <td><span class="score ${scoreClass}">${d.ThG_MR_score}</span></td>
                     </tr>`;
                 }).join('');
             } catch(e) { console.error('Siret error:', e); }
@@ -328,7 +392,7 @@
                 if (data.siretisation) {
                     const si = data.siretisation;
                     html += `<div class="modal-section"><h4>SIRETisation</h4>
-                        <p>Société: <strong>${si.nom_societe || '-'}</strong> | SIRET: <strong>${si.ThG_siret || '-'}</strong> | Score: <strong>${si.ThG_score || 0}</strong></p></div>`;
+                        <p>Société: <strong>${si.nom_societe || '-'}</strong> | SIRET: <strong>${si.ThG_siret || '-'}</strong> | Score: <strong>${si.ThG_MR_score || 0}</strong></p></div>`;
                 }
                 if (data.keywords && data.keywords.length) {
                     html += `<div class="modal-section"><h4>Mots-clés (top ${data.keywords.length})</h4><div class="data-list">`;
@@ -343,11 +407,111 @@
 
         function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
 
-        function loadAll() { loadOverview(); loadActivityChart(); loadExtensionChart(); loadTopSiretisation(); }
+        function formatUptime(ms) {
+            if (!ms) return '-';
+            var now = Date.now();
+            var diff = now - ms;
+            var days = Math.floor(diff / 86400000);
+            var hours = Math.floor((diff % 86400000) / 3600000);
+            var mins = Math.floor((diff % 3600000) / 60000);
+            if (days > 0) return days + 'j ' + hours + 'h';
+            if (hours > 0) return hours + 'h ' + mins + 'm';
+            return mins + 'm';
+        }
 
-        // Auto-refresh every 30s
+        async function loadPM2() {
+            try {
+                var resp = await fetch('/api/pm2');
+                var procs = await resp.json();
+                var tbody = document.getElementById('pm2-body');
+                var total = procs.length;
+                var online = procs.filter(function(p){return p.status==='online';}).length;
+                var stopped = total - online;
+                document.getElementById('pm2-total').textContent = total;
+                document.getElementById('pm2-online').textContent = online;
+                document.getElementById('pm2-stopped').textContent = stopped;
+                if (total === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#94a3b8;">Aucun processus PM2</td></tr>';
+                    return;
+                }
+                var html = '';
+                for (var i = 0; i < procs.length; i++) {
+                    var p = procs[i];
+                    var sc = p.status === 'online' ? 'online' : 'stopped';
+                    var sl = p.status === 'online' ? 'En ligne' : 'Arr\u00eat\u00e9';
+                    var actionBtn = p.status === 'online'
+                        ? '<button class="pm2-btn stop" data-action="stop" data-name="' + p.name + '">Stop</button>'
+                        : '<button class="pm2-btn start" data-action="start" data-name="' + p.name + '">Start</button>';
+                    html += '<tr>';
+                    html += '<td><strong>' + p.name + '</strong></td>';
+                    html += '<td>' + (p.pid || '-') + '</td>';
+                    html += '<td><span class="badge ' + sc + '">' + sl + '</span></td>';
+                    html += '<td>' + p.cpu + '%</td>';
+                    html += '<td>' + p.memory + ' MB</td>';
+                    html += '<td class="uptime-text">' + formatUptime(p.uptime) + '</td>';
+                    html += '<td>' + p.restarts + '</td>';
+                    html += '<td class="pm2-actions">';
+                    html += '<button class="pm2-btn restart" data-action="restart" data-name="' + p.name + '">Restart</button>';
+                    html += actionBtn;
+                    html += '</td></tr>';
+                }
+                tbody.innerHTML = html;
+                document.querySelectorAll('.pm2-btn[data-action]').forEach(function(btn) {
+                    btn.onclick = function() { pm2Action(btn.dataset.action, btn.dataset.name); };
+                });
+            } catch(e) { console.error('PM2 load error:', e); }
+        }
+
+        async function pm2Action(action, name) {
+            try {
+                var resp = await fetch('/api/pm2/' + action + '/' + name, {method:'POST'});
+                if (resp.ok) { setTimeout(loadPM2, 2000); }
+            } catch(e) { console.error('PM2 action error:', e); }
+        }
+
+        async function loadServiceHealth() {
+            try {
+                const res = await fetch('/api/service-health');
+                const data = await res.json();
+                let html = '';
+                for (const [svc, info] of Object.entries(data)) {
+                    const errCount = info.error_lines || 0;
+                    const color = errCount > 100 ? '#e53e3e' : errCount > 10 ? '#d69e2e' : '#48bb78';
+                    html += '<div style="margin-bottom:12px;padding:10px;background:#1a202c;border-radius:6px;border-left:3px solid ' + color + '">';
+                    html += '<strong style="color:' + color + '">' + svc + '</strong> - ' + errCount + ' lignes d\'erreur';
+                    if (info.last_errors && info.last_errors.length > 0) {
+                        html += '<pre style="color:#a0aec0;font-size:11px;margin-top:6px;max-height:80px;overflow-y:auto;white-space:pre-wrap;">';
+                        html += info.last_errors.slice(-5).join('\n');
+                        html += '</pre>';
+                    }
+                    html += '</div>';
+                }
+                document.getElementById('service-health').innerHTML = html || '<p style="color:#718096;">Aucune erreur</p>';
+            } catch(e) { console.error('Health error:', e); }
+        }
+
+        async function loadRecentActivity() {
+            try {
+                const res = await fetch('/api/recent-activity');
+                const data = await res.json();
+                const tbody = document.getElementById('activity-body');
+                if (!data || data.error) { tbody.innerHTML = '<tr><td colspan="4">Aucune donnee</td></tr>'; return; }
+                tbody.innerHTML = data.map(function(r) {
+                    return '<tr><td>' + r.date + '</td><td>' + (r.crawled || 0) + '</td><td>' + (r.online || 0) + '</td><td>' + (r.collected || 0) + '</td></tr>';
+                }).join('');
+            } catch(e) { console.error('Recent activity error:', e); }
+        }
+
+        function loadAll() {
+            loadOverview(); loadActivityChart(); loadExtensionChart();
+            loadTopSiretisation(); loadPM2(); loadServiceHealth(); loadRecentActivity();
+            document.getElementById('last-update').textContent = 'Maj: ' + new Date().toLocaleTimeString('fr-FR');
+        }
+
+        // Auto-refresh: overview+PM2 every 30s, charts every 2min
         loadAll();
-        setInterval(loadOverview, 30000);
+        setInterval(function(){ loadOverview(); loadPM2(); }, 30000);
+        setInterval(function(){ loadActivityChart(); loadExtensionChart(); loadTopSiretisation(); loadRecentActivity(); }, 120000);
     </script>
 </body>
 </html>

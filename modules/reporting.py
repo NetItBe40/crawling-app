@@ -131,11 +131,11 @@ def get_hourly_activity(days=7) -> list:
         since = datetime.now() - timedelta(days=days)
         query = """
             SELECT
-                DATE_FORMAT(crawled_at, '%%Y-%%m-%%d %%H:00:00') as hour,
+                CONCAT(DATE(crawled_at), ' ', LPAD(HOUR(crawled_at), 2, '0'), ':00:00') as hour,
                 COUNT(*) as count
             FROM APP_domaine
             WHERE crawled_at IS NOT NULL AND crawled_at >= %s
-            GROUP BY DATE_FORMAT(crawled_at, '%%Y-%%m-%%d %%H:00:00')
+            GROUP BY CONCAT(DATE(crawled_at), ' ', LPAD(HOUR(crawled_at), 2, '0'), ':00:00')
             ORDER BY hour ASC
         """
         results = DatabaseManager.execute_query(query, params=(since.strftime('%Y-%m-%d %H:%M:%S'),), fetch="all")
@@ -151,12 +151,12 @@ def get_daily_activity(days=30) -> list:
         since = datetime.now() - timedelta(days=days)
         query = """
             SELECT
-                DATE_FORMAT(crawled_at, '%%Y-%%m-%%d') as day,
+                DATE(crawled_at) as day,
                 COUNT(*) as crawled,
                 SUM(CASE WHEN flag_data_collected=1 THEN 1 ELSE 0 END) as collected
             FROM APP_domaine
             WHERE crawled_at IS NOT NULL AND crawled_at >= %s
-            GROUP BY DATE_FORMAT(crawled_at, '%%Y-%%m-%%d')
+            GROUP BY DATE(crawled_at)
             ORDER BY day ASC
         """
         results = DatabaseManager.execute_query(query, params=(since.strftime('%Y-%m-%d %H:%M:%S'),), fetch="all")
@@ -207,12 +207,12 @@ def get_http_daily(days=30) -> list:
         since = datetime.now() - timedelta(days=days)
         query = """
             SELECT
-                DATE_FORMAT(http_at, '%%Y-%%m-%%d') as day,
+                DATE(http_at) as day,
                 SUM(CASE WHEN http_statut=1 THEN 1 ELSE 0 END) as ok,
                 SUM(CASE WHEN http_statut=0 THEN 1 ELSE 0 END) as error
             FROM APP_domaine
             WHERE http_at IS NOT NULL AND http_at >= %s
-            GROUP BY DATE_FORMAT(http_at, '%%Y-%%m-%%d')
+            GROUP BY DATE(http_at)
             ORDER BY day ASC
         """
         results = DatabaseManager.execute_query(query, params=(since.strftime('%Y-%m-%d %H:%M:%S'),), fetch="all")
@@ -362,11 +362,11 @@ def get_extension_distribution() -> list:
     try:
         query = """
             SELECT
-                extension,
+                SUBSTRING_INDEX(domaine, '.', -1) as extension,
                 COUNT(*) as count
             FROM APP_domaine
-            WHERE deleted=0 AND extension IS NOT NULL AND extension != ''
-            GROUP BY extension
+            WHERE deleted=0 AND domaine IS NOT NULL AND domaine != ''
+            GROUP BY SUBSTRING_INDEX(domaine, '.', -1)
             ORDER BY count DESC
             LIMIT 15
         """

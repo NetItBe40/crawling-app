@@ -4,6 +4,7 @@ Algorithme de scoring multi-critères pour associer les domaines crawlés
 aux entreprises du registre SIRENE.
 """
 import asyncio
+import os
 import re
 import signal
 import time
@@ -47,10 +48,21 @@ def string_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+
+def compute_tva_from_siren(siren: str) -> str:
+    try:
+        s = siren.replace(' ', '')
+        if len(s) != 9 or not s.isdigit(): return ''
+        key = (12 + 3 * (int(s) % 97)) % 97
+        return f'FR{key:02d}{s}'
+    except: return ''
+
 class SIRETMatcher:
     def __init__(self):
         self.config = SIRETISATION
         self.weights = self.config["weights"]
+        self.worker_id = int(os.environ.get("WORKER_ID", 0))
+        self.num_workers = int(os.environ.get("NUM_WORKERS", 1))
         self.stats = {
             "processed": 0,
             "matched": 0,
@@ -64,16 +76,16 @@ class SIRETMatcher:
         query = """
             SELECT d.ID, d.domaine, d.description
             FROM APP_domaine d
+            LEFT JOIN APP_domaine_SIRETISATION s ON d.ID = s.ID AND s.ThG_MR_score IS NOT NULL AND s.ThG_MR_score > 0
             WHERE d.deleted = 0
               AND d.flag_data_collected = 1
-              AND d.ID NOT IN (
-                  SELECT DISTINCT ID FROM APP_domaine_SIRETISATION
-                  WHERE ThG_MR_score IS NOT NULL AND ThG_MR_score > 0
-              )
+              AND d.http_statut = 1
+              AND s.ID IS NULL
+              AND MOD(d.ID, %s) = %s
             ORDER BY d.crawled_at DESC
             LIMIT %s
         """
-        return DatabaseManager.execute_query(query, (size,))
+        return DatabaseManager.execute_query(query, (self.num_workers, self.worker_id, size,))
 
     def get_domain_data(self, domain_id: int) -> dict:
         data = {"id": domain_id}
@@ -402,21 +414,60 @@ class SIRETMatcher:
 
         if best["score"] >= self.config["score_threshold"]:
             self.stats["matched"] += 1
+            try:
+                _siren = best['siret'][:9] if best.get('siret') and len(best.get('siret','')) >= 9 else ''
+                if _siren: self.save_dirigeants_and_tva(domain_id, _siren)
+            except Exception as e:
+                logger.error(f'Dirigeants/TVA error: {e}')
         else:
             self.stats["no_match"] += 1
 
+    def save_dirigeants_and_tva(self, domain_id, siren):
+        from datetime import datetime as dt
+        now = dt.now().strftime('%Y-%m-%d %H:%M:%S')
+        s = siren.replace(' ', '')[:9]
+        tva = compute_tva_from_siren(s)
+        if tva:
+            try:
+                DatabaseManager.execute_query(
+                    'INSERT IGNORE INTO APP_tva (id_domaine, tva_number, created_at, updated_at) VALUES (%s,%s,%s,%s)',
+                    (domain_id, tva, now, now), fetch='none')
+            except Exception as e:
+                logger.error(f'TVA error {domain_id}: {e}')
+        if len(s) == 9:
+            try:
+                dirs = DatabaseManager.execute_query(
+                    'SELECT nom, prenom, qualite, type_personne, denomination_pm FROM dirigeants WHERE siren = %s LIMIT 20',
+                    (s,), db_name='sirene')
+                if not dirs: return
+                data = []
+                for d in dirs:
+                    if d.get('type_personne') == 'PP':
+                        n = f"{d.get('prenom','')} {d.get('nom','')}".strip()
+                        if d.get('qualite'): n += f" ({d['qualite']})"
+                    elif d.get('type_personne') == 'PM':
+                        n = d.get('denomination_pm','') or d.get('nom','')
+                        if d.get('qualite'): n += f" ({d['qualite']})"
+                    else: n = d.get('nom','')
+                    if n: data.append((domain_id, n[:200], now, now))
+                if data:
+                    DatabaseManager.execute_many(
+                        'INSERT IGNORE INTO APP_dirigeant (id_domaine, nom, created_at, updated_at) VALUES (%s,%s,%s,%s)', data)
+            except Exception as e:
+                logger.error(f'Dirigeants error {domain_id}: {e}')
+
     async def run(self):
         self.stats["start_time"] = time.time()
-        logger.info("=== SIRETisation started ===")
+        logger.info(f"=== SIRETisation started === [Worker {self.worker_id}/{self.num_workers}]")
 
         cycle = 0
         while not shutdown_event.is_set():
             domains = self.get_domains_to_match()
 
             if not domains:
-                logger.info("No domains to match, sleeping 120s...")
+                logger.info("No domains to match, sleeping 30s...")
                 try:
-                    await asyncio.wait_for(shutdown_event.wait(), timeout=120)
+                    await asyncio.wait_for(shutdown_event.wait(), timeout=30)
                 except asyncio.TimeoutError:
                     pass
                 continue

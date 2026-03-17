@@ -64,7 +64,7 @@ module.exports = {
     {
       name: "dashboard",
       script: "/home/netit972/crawling-app/venv/bin/gunicorn",
-      args: "--bind 0.0.0.0:5050 --workers 2 --timeout 120 modules.dashboard:app",
+      args: "--bind 0.0.0.0:5051 --workers 2 --timeout 300 modules.dashboard:app",
       cwd: "/home/netit972/crawling-app",
       interpreter: "none",
       autorestart: true,
