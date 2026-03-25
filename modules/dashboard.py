@@ -131,18 +131,18 @@ def get_extension_stats() -> list:
         return []
 
 
-def get_top_siretisation(limit: int = 20) -> list:
+def get_top_siretisation(limit: int = 20, min_score: int = 50, sort_by: str = "score") -> list:
     query = """
         SELECT s.ID as domain_id, d.domaine, s.nom_societe,
-               s.ThG_siret, s.ThG_MR_score, s.code_postal, s.ville
+               s.ThG_siret, s.ThG_MR_score, s.code_postal, s.ville, d.crawled_at
         FROM APP_domaine_SIRETISATION s
         JOIN APP_domaine d ON s.ID = d.ID
-        WHERE s.ThG_MR_score > 50
-        ORDER BY s.ThG_MR_score DESC
+        WHERE s.ThG_MR_score >= %s
+        ORDER BY """ + ("d.crawled_at DESC" if sort_by == "date" else "s.ThG_MR_score DESC") + """
         LIMIT %s
     """
     try:
-        return DatabaseManager.execute_query(query, (limit,))
+        return DatabaseManager.execute_query(query, (min_score, limit,))
     except Exception:
         return []
 
@@ -226,7 +226,9 @@ def api_extensions():
 @app.route("/api/top-siretisation")
 def api_top_siretisation():
     limit = request.args.get("limit", 20, type=int)
-    data = get_top_siretisation(limit)
+    min_score = request.args.get("min_score", 50, type=int)
+    sort_by = request.args.get("sort_by", "score")
+    data = get_top_siretisation(limit, min_score, sort_by)
     return jsonify(data)
 
 
@@ -447,6 +449,11 @@ def api_reporting():
         logger.error(f'Error in api_reporting: {e}')
         return jsonify({'error': str(e)}), 500
 
+
+from modules.dashboard_extra import register_extra_routes
+from modules.email_cleanup import register_email_cleanup_routes
+register_extra_routes(app)
+register_email_cleanup_routes(app)
 
 def main():
     logger.info(f"Dashboard starting on {DASHBOARD['host']}:{DASHBOARD['port']}")

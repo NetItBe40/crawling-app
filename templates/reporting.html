@@ -72,6 +72,23 @@
             <table><thead><tr><th>Service</th><th>Statut</th><th>CPU %</th><th>Memoire (MB)</th><th>Restarts</th></tr></thead><tbody id="pm2Body"></tbody></table>
         </div>
         <div class="section">
+            <h2>Nettoyage Emails Parasites</h2>
+            <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:15px">
+                <div id="emailStats" style="flex:1;min-width:300px">
+                    <span>Chargement des stats...</span>
+                </div>
+                <div style="display:flex;gap:10px">
+                    <button onclick="runEmailCleanup('dry-run')" style="padding:8px 16px;background:#2196F3;color:white;border:none;border-radius:4px;cursor:pointer">Dry-Run</button>
+                    <button onclick="runEmailCleanup('marquage')" style="padding:8px 16px;background:#FF9800;color:white;border:none;border-radius:4px;cursor:pointer">Marquage</button>
+                    <button onclick="runEmailCleanup('lowercase')" style="padding:8px 16px;background:#9C27B0;color:white;border:none;border-radius:4px;cursor:pointer">Lowercase</button>
+                    <button onclick="runEmailCleanup('full')" style="padding:8px 16px;background:#f44336;color:white;border:none;border-radius:4px;cursor:pointer">Full</button>
+                </div>
+            </div>
+            <div id="cleanupResult" style="display:none;background:#1e1e1e;border-radius:8px;padding:15px;margin-top:10px">
+                <pre id="cleanupOutput" style="color:#e0e0e0;font-size:12px;white-space:pre-wrap;margin:0"></pre>
+            </div>
+        </div>
+        <div class="section">
             <h2>Erreurs HTTP Recentes</h2>
             <table><thead><tr><th>Domaine</th><th>Code HTTP</th><th>Date</th></tr></thead><tbody id="errBody"></tbody></table>
         </div>
@@ -124,6 +141,34 @@
         new Chart(document.getElementById('httpDailyChart'),{type:'bar',data:{labels:hdd.map(function(d){return d.day}),datasets:[{label:'OK',data:hdd.map(function(d){return d.ok}),backgroundColor:'#4ecca3'},{label:'Erreur',data:hdd.map(function(d){return d.error}),backgroundColor:'#e94560'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true,ticks:{maxTicksLimit:10}},y:{stacked:true}}}});
         var ed = R.extension_distribution||[];
         new Chart(document.getElementById('extChart'),{type:'bar',data:{labels:ed.map(function(d){return '.'+d.extension}),datasets:[{data:ed.map(function(d){return d.count}),backgroundColor:'#e94560'}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}}}});
+
+        // === Email Cleanup ===
+        function loadEmailStats(){
+            fetch('/api/email-cleanup/stats').then(r=>r.json()).then(d=>{
+                if(d.error){document.getElementById('emailStats').innerHTML='<span style="color:red">Erreur: '+d.error+'</span>';return}
+                var h='<strong style="color:#4ecdc4">Actifs: '+((d.actifs||0).toLocaleString())+'</strong> | ';
+                h+='<strong style="color:#e94560">Supprimes: '+((d.supprimes||0).toLocaleString())+'</strong>';
+                document.getElementById('emailStats').innerHTML=h;
+            }).catch(e=>{document.getElementById('emailStats').innerHTML='<span style="color:red">Erreur connexion</span>'});
+        }
+        function runEmailCleanup(mode){
+            var btn=event.target;btn.disabled=true;btn.textContent='En cours...';
+            var el=document.getElementById('cleanupResult');el.style.display='block';
+            document.getElementById('cleanupOutput').textContent='Execution en cours (mode: '+mode+')...\nCela peut prendre quelques secondes.';
+            fetch('/api/email-cleanup/'+mode,{method:'POST'}).then(r=>r.json()).then(d=>{
+                btn.disabled=false;btn.textContent=mode.charAt(0).toUpperCase()+mode.slice(1);
+                if(d.error){document.getElementById('cleanupOutput').textContent='ERREUR: '+d.error;return}
+                var out='=== Mode: '+d.mode+' ===\n';
+                if(d.avant)out+=d.avant+'\n';
+                if(d.categories){Object.keys(d.categories).forEach(k=>{out+=k+' : '+d.categories[k]+'\n'})}
+                if(d.total_line)out+='\n'+d.total_line+'\n';
+                if(d.apres)out+=d.apres+'\n';
+                document.getElementById('cleanupOutput').textContent=out;
+                loadEmailStats();
+            }).catch(e=>{btn.disabled=false;btn.textContent=mode;document.getElementById('cleanupOutput').textContent='Erreur: '+e});
+        }
+        loadEmailStats();
+
     </script>
 </body>
 </html>
